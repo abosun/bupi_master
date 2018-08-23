@@ -311,7 +311,6 @@ def inception_v4(inputs, num_classes=1001, is_training=True,
         # can be set to False to disable pooling here (as in resnet_*()).
         with tf.variable_scope('Logits'):
           # 8 x 8 x 1536
-          net = end_points['Mixed_6h']
           kernel_size = net.get_shape()[1:3]
           if kernel_size.is_fully_defined():
             net = slim.avg_pool2d(net, kernel_size, padding='VALID',
@@ -323,7 +322,10 @@ def inception_v4(inputs, num_classes=1001, is_training=True,
           if not num_classes:
             return net, end_points
           # 1 x 1 x 1536
-          net = tf.concat([tf.reduce_mean(end_points['Mixed_6h'],[1,2]), tf.reduce_mean(end_points['Mixed_7c'],[1,2])],axis=1)
+          aux_logits = slim.avg_pool2d(end_points['Mixed_6h'], [5, 5], stride=3, padding='VALID', scope='AvgPool_1a_5x5')
+          aux_logits = slim.conv2d(aux_logits, 128, [1, 1], scope='Conv2d_1b_1x1')
+          aux_logits = tf.reduce_mean(aux_logits,axis=[1,2])
+          print(aux_logits)
  #         net = slim.dropout(net, dropout_keep_prob, scope='Dropout_1b')
  #         net = slim.flatten(net, scope='PreLogitsFlatten')
 #          end_points['PreLogitsFlatten'] = net
@@ -333,13 +335,15 @@ def inception_v4(inputs, num_classes=1001, is_training=True,
           def conving(net,scope):
              net = slim.conv2d(net, 1, [1, 1], scope=scope, activation_fn=tf.nn.relu)
              return tf.reduce_mean(net, axis=[1,2], keep_dims=False)
+          net = tf.concat([tf.reduce_mean(end_points['Mixed_6h'],[1,2]), aux_logits],axis=1)
+          net = slim.dropout(net, 0.9, is_training=is_training)
           score_list = []
           for i in range(9):
             tmp = slim.fully_connected(net, 1, activation_fn=None, scope='Logit_sub'+"%02d"%(i+1))
             #tmp = conving(net, 'Logit_sub'+"%02d"%(i+1))
             score_list.append(tmp)
             #score_list.append(tf.reduce_max(tmp, keep_dims=True, axis=1))
-          tmp = slim.fully_connected(net, 10, activation_fn=None, scope='Logit_sub'+'10')
+          tmp = slim.fully_connected(net, 1, activation_fn=None, scope='Logit_sub'+'10')
           #tmp = conving(net, scope='Logit_sub10')
           score_list.append(tf.reduce_max(tmp, keep_dims=True, axis=1))
           ll = tf.concat(score_list, axis = 1)
@@ -352,6 +356,7 @@ def inception_v4(inputs, num_classes=1001, is_training=True,
           #logits = tf.concat([ll,-ll+1.0],axis=1)
           end_points['Logits2'] = tf.concat([ll1,-ll1],axis=1)
           end_points['Logits10'] = ll
+          end_points['norm'] = 1-ll1
           end_points['Logits'] = logits
           end_points['Predictions'] = tf.nn.softmax(logits, name='Predictions')
     return logits, end_points

@@ -222,8 +222,28 @@ def resnet_v2(inputs,
             net = tf.concat([net,1-net],1)
             end_points[sc.name + '/spatial_squeeze'] = net
           end_points['predictions'] = slim.softmax(net, scope='predictions')
+        net = end_points['resnet_v2_152/block3']
+	net = tf.reduce_mean(net,axis=[1,2])
+        score_list = []
+        for i in range(9):
+            tmp = slim.fully_connected(net, 1, activation_fn=None, scope='Logit_sub'+"%02d"%(i+1))
+            #tmp = conving(net, 'Logit_sub'+"%02d"%(i+1))
+            score_list.append(tmp)
+            #score_list.append(tf.reduce_max(tmp, keep_dims=True, axis=1))
+        tmp = slim.fully_connected(net, 5, activation_fn=None, scope='Logit_sub'+'10')
+        #tmp = conving(net, scope='Logit_sub10')
+        score_list.append(tf.reduce_max(tmp, keep_dims=True, axis=1))
+        ll = tf.concat(score_list, axis = 1)
+        ll1 = tf.reduce_max(ll, keep_dims=True, axis=1)
+        logits = tf.concat([-ll1,ll],axis=1)
+#        print(end_points)
+        end_points['Logits2'] = tf.concat([ll1,1-ll1],axis=1)
+        end_points['Logits10'] = ll
+        end_points['norm'] = 1-ll1
+        end_points['Logits'] = logits
+        end_points['Predictions'] = tf.nn.softmax(logits, name='Predictions')
         return net, end_points
-resnet_v2.default_image_size = 224
+resnet_v2.default_image_size = 320
 
 
 def resnet_v2_block(scope, base_depth, num_units, stride):

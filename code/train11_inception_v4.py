@@ -454,6 +454,8 @@ def main(_):
       """Allows data parallelism by creating multiple clones of network_fn."""
       images, labels = batch_queue.dequeue()
       logits, end_points = network_fn(images)
+      label_M1, label_C = tf.split(labels, [1,10], 1)
+      label_M = tf.concat([1-label_M1, label_M1], axis=1)
       #############################
       # Specify the loss function #
       #############################
@@ -462,8 +464,12 @@ def main(_):
 #            end_points['AuxLogits'], labels,
 #            label_smoothing=FLAGS.label_smoothing, weights=0.4,
 #            scope='aux_loss')
+      for logit in tf.split(end_points['Logits10'], 10, axis=1):
+        slim.losses.add_loss(tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+          logits=tf.concat([logit,-logit],1), labels=label_M)*label_M1)*0.1)
       slim.losses.softmax_cross_entropy(
-          end_points['Logits'], labels, label_smoothing=FLAGS.label_smoothing, weights=1.0)
+          end_points['Logits'], labels, weights=0.1)
+#      slim.losses.add_loss(tf.nn.softmax_cross_entropy_with_logits(labels = labels, logits = end_points['Logits'])*0.3)
       return end_points
 
     # Gather initial summaries.

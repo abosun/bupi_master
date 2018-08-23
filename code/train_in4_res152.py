@@ -311,8 +311,40 @@ def _configure_optimizer(learning_rate):
     raise ValueError('Optimizer [%s] was not recognized', FLAGS.optimizer)
   return optimizer
 
-
 def _get_init_fn():
+  if FLAGS.checkpoint_path is None:
+    return None
+  # Warn the user if a checkpoint exists in the train_dir. Then we'll be
+  # ignoring the checkpoint anyway.
+  if tf.train.latest_checkpoint(FLAGS.train_dir):
+    tf.logging.info(
+        'Ignoring --checkpoint_path because a checkpoint already exists in %s'
+        % FLAGS.train_dir)
+    return None
+  exclusions = []
+  if FLAGS.checkpoint_exclude_scopes:
+    exclusions = [scope.strip()
+                  for scope in FLAGS.checkpoint_exclude_scopes.split(',')]
+  # TODO(sguada) variables.filter_variables()
+  variables_to_restore = []
+  for var in slim.get_model_variables():
+    if 'ogit' in var.op.name or 'resnet' in var.op.name: continue
+    for exclusion in exclusions:
+      if var.op.name.startswith(exclusion):
+        break
+    else:
+      variables_to_restore.append(var)
+  if tf.gfile.IsDirectory(FLAGS.checkpoint_path):
+    checkpoint_path = tf.train.latest_checkpoint(FLAGS.checkpoint_path)
+  else:
+    checkpoint_path = FLAGS.checkpoint_path
+  tf.logging.info('Fine-tuning from %s' % checkpoint_path)
+  return slim.assign_from_checkpoint_fn(
+      checkpoint_path,
+      variables_to_restore,
+      ignore_missing_vars=FLAGS.ignore_missing_vars)
+
+def _2get_init_fn():
   """Returns a function run by the chief worker to warm-start the training.
 
   Note that the init_fn is only run when initializing the model during the very
@@ -321,16 +353,16 @@ def _get_init_fn():
   Returns:
     An init function run by the supervisor.
   """
-  if FLAGS.checkpoint_path is None:
-    return None
+#  if FLAGS.checkpoint_path is None:
+#    return None
 
   # Warn the user if a checkpoint exists in the train_dir. Then we'll be
   # ignoring the checkpoint anyway.
-  if tf.train.latest_checkpoint(FLAGS.train_dir):
-    tf.logging.info(
-        'Ignoring --checkpoint_path because a checkpoint already exists in %s'
-        % FLAGS.train_dir)
-    return None
+#  if tf.train.latest_checkpoint(FLAGS.train_dir):
+#    tf.logging.info(
+#        'Ignoring --checkpoint_path because a checkpoint already exists in %s'
+#        % FLAGS.train_dir)
+#    return None
 
   exclusions = []
   if FLAGS.checkpoint_exclude_scopes:
@@ -338,14 +370,32 @@ def _get_init_fn():
                   for scope in FLAGS.checkpoint_exclude_scopes.split(',')]
 
   # TODO(sguada) variables.filter_variables()
+
   variables_to_restore = []
   for var in slim.get_model_variables():
-    if 'ogit' in var.op.name: continue
+    if 'ogit' in var.op.name or 'resnet' in var.op.name: continue
     for exclusion in exclusions:
       if var.op.name.startswith(exclusion):
         break
     else:
       variables_to_restore.append(var)
+#  saver = tf.train.Saver(variables_to_restore)
+#  with  tf.Session() as sess:
+#    saver.restore(sess, 'checkp/inception_v4.ckpt')
+  print('restore-------')
+#  variables_to_restore = []
+#  for var in slim.get_model_variables():
+#    if 'ogit' in var.op.name or 'nception' in var.op.name: continue
+#    for exclusion in exclusions:
+#      if var.op.name.startswith(exclusion):
+#        break
+#    else:
+#      variables_to_restore.append(var)
+#  saver = tf.train.Saver(variables_to_restore)
+#  with  tf.Session() as sess:
+#    saver.restore(sess, 'checkp/resnet_v2_152.ckpt')
+
+  return 
 
   if tf.gfile.IsDirectory(FLAGS.checkpoint_path):
     checkpoint_path = tf.train.latest_checkpoint(FLAGS.checkpoint_path)
@@ -407,9 +457,15 @@ def main(_):
     ######################
     # Select the network #
     ######################
-    network_fn = nets_factory.get_network_fn(
-        FLAGS.model_name,
-        num_classes=2,#(dataset.num_classes - FLAGS.labels_offset),
+    network_fn_in4 = nets_factory.get_network_fn(
+        'inception_v4',
+        num_classes=11,#(dataset.num_classes - FLAGS.labels_offset),
+        weight_decay=FLAGS.weight_decay,
+        is_training=True)
+
+    network_fn_res152 = nets_factory.get_network_fn(
+        'resnet_v2_152',
+        num_classes=11,#(dataset.num_classes - FLAGS.labels_offset),
         weight_decay=FLAGS.weight_decay,
         is_training=True)
 
@@ -453,18 +509,33 @@ def main(_):
     def clone_fn(batch_queue):
       """Allows data parallelism by creating multiple clones of network_fn."""
       images, labels = batch_queue.dequeue()
-      logits, end_points = network_fn(images)
+      label_M1, label_C = tf.split(labels, [1,10], 1)
+      label_M = tf.concat([1-label_M1, label_M1], axis=1)
+
+      logits_in4, end_in4 = network_fn_in4(images)
+      logits_res152, end_res152 = network_fn_res152(images)
+      
       #############################
       # Specify the loss function #
       #############################
+      norm = tf.reduce_min(tf.stack([end_in4['norm'], end_res152['norm']],axis=2),axis=2)
+      Logits2 = end_in4['Logits2']#tf.concat([-norm, norm],axis=1)
+      Logits10 = end_in4['Logits10']#tf.reduce_max(tf.stack([end_in4['Logits10'], end_res152['Logits10']],axis=2),axis=2)
+      print(Logits2)
+      print(Logits10)
+      slim.losses.softmax_cross_entropy(
+          Logits2, label_M, weights=0.7)
+      slim.losses.add_loss(
+        tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+            labels = label_C, logits = Logits10*(1-label_M1)*0.3)))
 #      if 'AuxLogits' in end_points:
 #        slim.losses.softmax_cross_entropy(
 #            end_points['AuxLogits'], labels,
 #            label_smoothing=FLAGS.label_smoothing, weights=0.4,
 #            scope='aux_loss')
-      slim.losses.softmax_cross_entropy(
-          end_points['Logits'], labels, label_smoothing=FLAGS.label_smoothing, weights=1.0)
-      return end_points
+#      slim.losses.softmax_cross_entropy(
+#          end_points['Logits'], labels, label_smoothing=FLAGS.label_smoothing, weights=1.0)
+      return end_in4
 
     # Gather initial summaries.
     summaries = set(tf.get_collection(tf.GraphKeys.SUMMARIES))
