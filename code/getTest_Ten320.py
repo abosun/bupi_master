@@ -91,6 +91,12 @@ def test_process(image, height, width):
     image = tf.subtract(image, 0.5)
     image = tf.multiply(image, 2.0)
     return image
+def boxGen(size, stride):
+    box_list = []
+    for i in range((1920-size)//stride+1):
+      for j in range((2560-size)//stride+1 ):
+        box_list.append([i*stride, i*stride+size, j*stride, j*stride+size])
+    return box_list
 def main(_):
   with tf.Graph().as_default():
     tf_global_step = slim.get_or_create_global_step()
@@ -99,7 +105,7 @@ def main(_):
     ####################
     network_fn = nets_factory.get_network_fn(
         FLAGS.model_name,
-        num_classes=11,
+        num_classes=2,
         is_training=False)
 
     ##############################################################
@@ -107,7 +113,7 @@ def main(_):
     ##############################################################
     pathTensor = tf.placeholder(tf.string)
     image = tf.image.decode_jpeg(pathTensor,channels=3)
-    imgs = [tf.image.crop_to_bounding_box(image, box[0], box[2], 640, 640) for box in boxe43]
+    imgs = [tf.image.crop_to_bounding_box(image, box[0], box[2], 320, 320) for box in boxGen(320,160)]
     images = tf.stack(imgs, axis=0)
     eval_image_size = FLAGS.eval_image_size
     images = test_process(images, eval_image_size, eval_image_size)
@@ -125,7 +131,7 @@ def main(_):
     import numpy as np
     import os
     import datetime
-    testPathes = glob.glob('./data/xuelang_round2_test_b_201808031/*jpg')
+    testPathes = glob.glob('./data/xuelang_round2_test_a_20180809/*jpg')
     li = ['filename|defect,probability']
     sumpath = 0
     for i,path in enumerate(testPathes):

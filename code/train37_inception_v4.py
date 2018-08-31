@@ -468,7 +468,7 @@ def main(_):
           end_points['Logits2'], label_M, weights=0.7)
 #      slim.losses.softmax_cross_entropy(
 #          end_points['Logits'], labels, weights=0.3)
-      slim.losses.add_loss(tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels = labels, logits = end_points['Logits'])*(1-label_M1)*0.3))
+      slim.losses.add_loss(tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels = labels, logits = end_points['Logits'])*(1-label_M1))*0.5)
       return end_points
 
     # Gather initial summaries.

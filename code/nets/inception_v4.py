@@ -335,18 +335,29 @@ def inception_v4(inputs, num_classes=1001, is_training=True,
           def conving(net,scope):
              net = slim.conv2d(net, 1, [1, 1], scope=scope, activation_fn=tf.nn.relu)
              return tf.reduce_mean(net, axis=[1,2], keep_dims=False)
-          net = tf.concat([tf.reduce_mean(end_points['Mixed_6h'],[1,2]), aux_logits],axis=1)
-          net = slim.dropout(net, 0.9, is_training=is_training)
-          score_list = []
-          for i in range(9):
-            tmp = slim.fully_connected(net, 1, activation_fn=None, scope='Logit_sub'+"%02d"%(i+1))
-            #tmp = conving(net, 'Logit_sub'+"%02d"%(i+1))
-            score_list.append(tmp)
-            #score_list.append(tf.reduce_max(tmp, keep_dims=True, axis=1))
-          tmp = slim.fully_connected(net, 1, activation_fn=None, scope='Logit_sub'+'10')
-          #tmp = conving(net, scope='Logit_sub10')
-          score_list.append(tf.reduce_max(tmp, keep_dims=True, axis=1))
-          ll = tf.concat(score_list, axis = 1)
+          def atten(net, scope):
+            with slim.arg_scope([slim.conv2d],
+                  weights_initializer=tf.truncated_normal_initializer(0.0, 0.01),
+                  weights_regularizer=slim.l2_regularizer(0.005)):
+              s = net.get_shape()[1:4]
+              Map = slim.conv2d(net, 10, [1,1], scope=scope+'_1', activation_fn=tf.nn.tanh)
+              Map = slim.conv2d(Map, 1, [1,1], scope=scope+'_2')
+              Map = tf.reshape(Map, [-1, 1,s[0]*s[1]], name=scope+'Attention_')
+              Map = tf.nn.softmax(Map,axis=2)
+              Z = tf.matmul(Map, tf.reshape(net,[-1,s[0]*s[1],s[2]]))
+              Z = tf.squeeze(Z, axis=1)
+            return Z
+#          net = tf.concat([atten(end_points['Mixed_7a'], 'Logit_atten7a'),atten(end_points['Mixed_6h'],'Logit_atten6h')],axis=1)
+          net = atten(end_points['Mixed_6h'],'Logit_atten6h')
+          net = slim.dropout(net, 0.85)
+          ll = slim.fully_connected(net, 10, activation_fn=None, scope='Logit_sub_final')
+
+#          for i in range(9):
+#            tmp = slim.fully_connected(net, 1, activation_fn=None, scope='Logit_sub'+"%02d"%(i+1))
+#            score_list.append(tmp)
+#          tmp = slim.fully_connected(net, 1, activation_fn=None, scope='Logit_sub'+'10')
+#          score_list.append(tf.reduce_max(tmp, keep_dims=True, axis=1))
+#          ll = tf.concat(score_list, axis = 1)
           ll1 = tf.reduce_max(ll, keep_dims=True, axis=1)
           logits = tf.concat([-ll1,ll],axis=1)
           #ll = tf.nn.sigmoid(ll)
